@@ -2,5 +2,23 @@
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "functions": {
+    "source": "functions"
+  },
+  "emulators": {
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 5002
+    },
+    "pubsub": {
+      "port": 5003
+    },
+    "ui": {
+      "enabled": true,
+      "port": 5000
+    }
   }
 }
