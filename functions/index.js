@@ -46,7 +46,6 @@ exports.siteAdded = functions.firestore
       const sitesPath = admin.firestore().collection("sites").doc(context.params.id)
       let input = snap.data();
       const date = generateDateStr();
-      const seed = Math.floor(Math.random() * 10);
       let promptArray = [];
 
       const generatePromptArray = function(){
@@ -67,7 +66,7 @@ exports.siteAdded = functions.firestore
         const gptResponse = await openai.complete({
           engine: "davinci-instruct-beta",
           prompt: promptArray,
-          maxTokens: 90,
+          maxTokens: 100,
           temperature: 0.7,
           topP: 1,
           presencePenalty: 0,
@@ -110,12 +109,17 @@ exports.siteAdded = functions.firestore
              siteAdjective: input.siteAdjective,
              siteTopic: input.siteTopic,
              siteType: input.siteType,
-             siteSeed: seed,
+             seedFont: input.seedFont,
+             seedLayout: input.seedLayout,
+             seedColor: input.seedColor,
+             seedMisc: input.seedMisc,
              gptTagline: gpt[0].text,
              gptIntro: gpt[1].text,
              gptMain: gpt[2].text,
              gptCta: gpt[3].text, 
              gptQuote: gpt[4].text,
+             loadingGpt: false,
+             url: input.url,
            })
            .then(() => {
              console.log(
