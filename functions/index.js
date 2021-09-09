@@ -14,26 +14,28 @@ admin.initializeApp();
 const config = {
   dailyTokens: 20,
   prompts: {
-    gptTagline: (topic, adj) => {
-      return `Write a ${adj}, compelling, one sentence tag line for a website about '${topic}'.`;
+    gptTagline: (topic, adj, type) => {
+      return `Write a ${adj}, compelling, one sentence tag line for a ${type} about '${topic}'.`;
     },
-    gptIntro: (topic, adj) => {
-      return `Write a compelling, passionate one paragraph introduction for a ${adj} website about '${topic}'.`;
+    gptIntro: (topic, adj, type) => {
+      return `Write an ${adj}, two paragraph introduction for a ${type} about '${topic}'.`;
     },
-    gptMain: (topic, adj) => {
-      return `Write one engaging paragraph describing why this website about '${topic}' was created.`;
+    gptMain: (topic, adj, type) => {
+      return `Write one ${adj}, engaging paragraph describing why this ${type} about '${topic}' was created.`;
     },
-    gptCta: (topic, adj) => {
-      return `Write a short, compelling, one sentence call to action to learn more. It is for a sign up form on website about '${topic}'.`;
+    gptCta: (topic, adj, type) => {
+      return `Write a short, compelling, one sentence call to action to learn more. It should be ${adj} in tone. It is for a sign up form on ${type} about '${topic}'.`;
     },
-    gptQuote: (topic, adj) => {
-      return `Write one motivational, short, personal quote from the founder of this website about '${topic}'. Include the founders name and title at the end.`;
+    gptQuote: (topic, adj, type) => {
+      return `Write a ${adj}, personal quote from the founder of this ${type} about '${topic}'.`;
     },
   },
 };
 
 let gptKey = functions.config().openai.key;
 let xrapidapiKey = functions.config().xrapidapi.key;
+const limiterPath = admin.firestore().collection("backend").doc("limiter");
+
 
 // firestore trigger for tracking activity
 exports.siteAdded = functions.firestore
@@ -41,16 +43,10 @@ exports.siteAdded = functions.firestore
   .onCreate((snap, context) => {
     return new Promise((resolve, reject) => {
       const openai = new OpenAI(gptKey);
+      const sitesPath = admin.firestore().collection("sites").doc(context.params.id);
 
       let limiterStatus = {};
-      const limiterPath = admin
-        .firestore()
-        .collection("backend")
-        .doc("limiter");
-      const sitesPath = admin
-        .firestore()
-        .collection("sites")
-        .doc(context.params.id);
+
       let input = snap.data();
       const date = generateDateStr();
       let promptArray = [];
@@ -58,7 +54,7 @@ exports.siteAdded = functions.firestore
         console.log(input);
         Object.values(config.prompts).map((value) => {
           promptArray.push(
-            value.call(null, input.siteTopic, input.siteAdjective)
+            value.call(null, input.siteTopic, input.siteAdjective, input.siteType)
           );
         });
       };
@@ -73,7 +69,7 @@ exports.siteAdded = functions.firestore
         const gptResponse = await openai.complete({
           engine: "davinci-instruct-beta",
           prompt: promptArray,
-          maxTokens: 100,
+          maxTokens: 120,
           temperature: 0.7,
           topP: 1,
           presencePenalty: 0,
@@ -110,23 +106,14 @@ exports.siteAdded = functions.firestore
       }
       // Add GPT responce to the DB
       function updateSiteDb(gpt) {
-
         sitesPath
-          .set({
-            siteAdjective: input.siteAdjective,
-            siteTopic: input.siteTopic,
-            siteType: input.siteType,
-            seedFont: input.seedFont,
-            seedLayout: input.seedLayout,
-            seedColor: input.seedColor,
-            seedMisc: input.seedMisc,
+          .update({
             gptTagline: gpt[0].text,
             gptIntro: gpt[1].text,
             gptMain: gpt[2].text,
             gptCta: gpt[3].text,
             gptQuote: gpt[4].text,
             loadingGpt: false,
-            url: input.url,
           })
           .then(() => {
             console.log(`Updated site record in db successfully`);
@@ -198,70 +185,55 @@ exports.siteAdded = functions.firestore
         return `${now.getUTCFullYear()}-${now.getMonth()}-${now.getDay()}`;
       }
 
-
-      // async function oldgetImageUrl() {
-      //   const urlPrompt = encodeURI(input.siteTopic);
-      //   fetch(
-      //     `https://contextualwebsearch-websearch-v1.p.rapidapi.com/api/Search/ImageSearchAPI?q=${urlPrompt}&pageNumber=1&pageSize=2&autoCorrect=true&safeSearch=true`,
-      //     {
-      //       method: "GET",
-      //       headers: {
-      //         "x-rapidapi-host":
-      //           "contextualwebsearch-websearch-v1.p.rapidapi.com",
-      //         "x-rapidapi-key": xrapidapiKey,
-      //       },
-      //     }
-      //   )
-      //     .then((response) => {
-      //       const imgArray = [response.value[0].url, response.value[1].url];
-      //       return imgArray;
-      //     })
-      //     .catch((err) => {
-      //       console.error("image search failed" + err);
-      //       return [
-      //         "http://lorempixel.com/800/800/",
-      //         "http://lorempixel.com/800/800/",
-      //       ];
-      //     });
-      // }
-
       //---------------------------------------
       // START
-      addImagesToDb();
+      addImagesToDb(input.siteTopic, sitesPath);
       getLimiter();
     });
   });
 
 
-  const addImagesToDb = async function () {
+
+const addImagesToDb = async function (topic, thisSitePath) {
+  return new Promise((resolve, reject) => {
+
     console.log("getting images");
+    images = [];
 
     const options = {
       method: "GET",
       url: "https://contextualwebsearch-websearch-v1.p.rapidapi.com/api/Search/ImageSearchAPI",
       params: {
-        q: input.siteTopic,
+        q: topic,
         pageNumber: "1",
         pageSize: "2",
         autoCorrect: "true",
         safeSearch: "true",
       },
       headers: {
-        "x-rapidapi-host":
-          "contextualwebsearch-websearch-v1.p.rapidapi.com",
-        "x-rapidapi-key":
-         xrapidapiKey,
+        "x-rapidapi-host": "contextualwebsearch-websearch-v1.p.rapidapi.com",
+        "x-rapidapi-key": xrapidapiKey,
       },
     };
 
     axios
-    .request(options)
-    .then((response) => {
-      console.log("got images");
-
-      images = [response.data.value[0].url, response.data.value[1].url];
-    })
-    .catch((err) => {
-      console.error("image search failed, defaulting." + err);
-    });
-  }
+      .request(options)
+      .then((response) => {
+        console.log("got images ", response.data.value[0].url);
+        images = [response.data.value[0].url, response.data.value[1].url];
+      })
+      .then(()=> {
+        thisSitePath
+        .update({
+          images: [...images],
+        })
+        .then(() => {
+          resolve("completed");
+        })
+      })
+      .catch((err) => {
+        console.error("image search failed for", topic, " ", err);
+        reject("Canceling addImagesToDb");
+      });
+  })
+};
