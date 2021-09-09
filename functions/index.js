@@ -1,6 +1,7 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const OpenAI = require("openai-api");
+const axios = require("axios").default;
 
 // firebase emulators:start
 // http://localhost:5000
@@ -8,60 +9,66 @@ const OpenAI = require("openai-api");
 
 admin.initializeApp();
 
-
 //---------------------------------------
 // CONFIG
 const config = {
   dailyTokens: 20,
   prompts: {
-     gptTagline : (topic, adj) => {
-      return `Write a ${adj}, compelling, one sentence tag line for a website about '${topic}'.`
+    gptTagline: (topic, adj) => {
+      return `Write a ${adj}, compelling, one sentence tag line for a website about '${topic}'.`;
     },
-     gptIntro : (topic, adj) => {
-      return `Write a compelling, passionate one paragraph introduction for a ${adj} website about '${topic}'.`
+    gptIntro: (topic, adj) => {
+      return `Write a compelling, passionate one paragraph introduction for a ${adj} website about '${topic}'.`;
     },
-     gptMain : (topic, adj) => {
-      return `Write one engaging paragraph describing why this website about '${topic}' was created.`
+    gptMain: (topic, adj) => {
+      return `Write one engaging paragraph describing why this website about '${topic}' was created.`;
     },
-     gptCta  : (topic, adj) => {
+    gptCta: (topic, adj) => {
       return `Write a short, compelling, one sentence call to action to learn more. It is for a sign up form on website about '${topic}'.`;
     },
-     gptQuote : (topic, adj) => {
-      return `Write one motivational, short, personal quote from the founder of this website about '${topic}'. Include the founders name and title at the end.`
+    gptQuote: (topic, adj) => {
+      return `Write one motivational, short, personal quote from the founder of this website about '${topic}'. Include the founders name and title at the end.`;
     },
-  }
+  },
 };
 
-let key = functions.config().openai.key;
+let gptKey = functions.config().openai.key;
+let xrapidapiKey = functions.config().xrapidapi.key;
 
 // firestore trigger for tracking activity
 exports.siteAdded = functions.firestore
   .document("/sites/{id}")
   .onCreate((snap, context) => {
     return new Promise((resolve, reject) => {
-      const openai = new OpenAI(key);
+      const openai = new OpenAI(gptKey);
 
       let limiterStatus = {};
-      const limiterPath = admin.firestore().collection("backend").doc("limiter");
-      const sitesPath = admin.firestore().collection("sites").doc(context.params.id)
+      const limiterPath = admin
+        .firestore()
+        .collection("backend")
+        .doc("limiter");
+      const sitesPath = admin
+        .firestore()
+        .collection("sites")
+        .doc(context.params.id);
       let input = snap.data();
       const date = generateDateStr();
       let promptArray = [];
-
-      const generatePromptArray = function(){
-         console.log(input);
-         Object.values(config.prompts).map(value => {
-            promptArray.push(value.call(null, input.siteTopic, input.siteAdjective))
-         })
+      const generatePromptArray = function () {
+        console.log(input);
+        Object.values(config.prompts).map((value) => {
+          promptArray.push(
+            value.call(null, input.siteTopic, input.siteAdjective)
+          );
+        });
       };
 
       //---------------------------------------
       // OPEN AI API
       // Remove 1 token from the database
       async function getAiResponce() {
-         generatePromptArray();
-         console.log('Generating website content from:');
-         console.log(promptArray);
+        generatePromptArray();
+        console.log("Getting GPT data");
 
         const gptResponse = await openai.complete({
           engine: "davinci-instruct-beta",
@@ -73,65 +80,63 @@ exports.siteAdded = functions.firestore
           frequencyPenalty: 0,
           bestOf: 1,
           n: 1,
-          stream: false
+          stream: false,
         });
-        console.log(gptResponse.data.choices);
-        updateSiteDb(gptResponse.data.choices)
+        console.log("Got GPT Data");
+        updateSiteDb(gptResponse.data.choices);
       }
-
 
       //---------------------------------------
       // WRITE TO DB
       // Remove 1 token from the database
       function removeToken() {
-         const newTokenValue = parseInt(limiterStatus.tokens) - 1;
- 
-         limiterPath
-           .set({
-             date: date,
-             tokens: newTokenValue,
-           })
-           .then(() => {
-             console.log(
-               `One token has been removed, ${newTokenValue} remaining today`
-             );
-             getAiResponce();
-           })
-           .catch(() => {
-             console.error("Unable to remove a token");
-             reject("Unable to remove a token");
-           });
-       }
+        const newTokenValue = parseInt(limiterStatus.tokens) - 1;
+
+        limiterPath
+          .set({
+            date: date,
+            tokens: newTokenValue,
+          })
+          .then(() => {
+            console.log(
+              `One token has been removed, ${newTokenValue} remaining today`
+            );
+            getAiResponce();
+          })
+          .catch(() => {
+            console.error("Unable to remove a token");
+            reject("Unable to remove a token");
+          });
+      }
       // Add GPT responce to the DB
-       function updateSiteDb(gpt) {
-         sitesPath
-           .set({
-             siteAdjective: input.siteAdjective,
-             siteTopic: input.siteTopic,
-             siteType: input.siteType,
-             seedFont: input.seedFont,
-             seedLayout: input.seedLayout,
-             seedColor: input.seedColor,
-             seedMisc: input.seedMisc,
-             gptTagline: gpt[0].text,
-             gptIntro: gpt[1].text,
-             gptMain: gpt[2].text,
-             gptCta: gpt[3].text, 
-             gptQuote: gpt[4].text,
-             loadingGpt: false,
-             url: input.url,
-           })
-           .then(() => {
-             console.log(
-               `Updated site record in db successfully`
-             );
-             resolve("completed");
-           })
-           .catch(() => {
-             console.error("Unable to add GPT response to db");
-             reject("Failed");
-           });
-       }
+      function updateSiteDb(gpt) {
+
+        sitesPath
+          .set({
+            siteAdjective: input.siteAdjective,
+            siteTopic: input.siteTopic,
+            siteType: input.siteType,
+            seedFont: input.seedFont,
+            seedLayout: input.seedLayout,
+            seedColor: input.seedColor,
+            seedMisc: input.seedMisc,
+            gptTagline: gpt[0].text,
+            gptIntro: gpt[1].text,
+            gptMain: gpt[2].text,
+            gptCta: gpt[3].text,
+            gptQuote: gpt[4].text,
+            loadingGpt: false,
+            url: input.url,
+          })
+          .then(() => {
+            console.log(`Updated site record in db successfully`);
+            resolve("completed");
+          })
+          .catch((error) => {
+            console.error("Unable to add GPT response to db", error);
+            reject("Failed");
+          });
+      }
 
       //---------------------------------------
       // LIMITER
@@ -185,7 +190,6 @@ exports.siteAdded = functions.firestore
         }
       }
 
-
       //---------------------------------------
       // HELPERS
       // Make date string
@@ -194,8 +198,70 @@ exports.siteAdded = functions.firestore
         return `${now.getUTCFullYear()}-${now.getMonth()}-${now.getDay()}`;
       }
 
+
+      // async function oldgetImageUrl() {
+      //   const urlPrompt = encodeURI(input.siteTopic);
+      //   fetch(
+      //     `https://contextualwebsearch-websearch-v1.p.rapidapi.com/api/Search/ImageSearchAPI?q=${urlPrompt}&pageNumber=1&pageSize=2&autoCorrect=true&safeSearch=true`,
+      //     {
+      //       method: "GET",
+      //       headers: {
+      //         "x-rapidapi-host":
+      //           "contextualwebsearch-websearch-v1.p.rapidapi.com",
+      //         "x-rapidapi-key": xrapidapiKey,
+      //       },
+      //     }
+      //   )
+      //     .then((response) => {
+      //       const imgArray = [response.value[0].url, response.value[1].url];
+      //       return imgArray;
+      //     })
+      //     .catch((err) => {
+      //       console.error("image search failed" + err);
+      //       return [
+      //         "http://lorempixel.com/800/800/",
+      //         "http://lorempixel.com/800/800/",
+      //       ];
+      //     });
+      // }
+
       //---------------------------------------
       // START
+      addImagesToDb();
       getLimiter();
     });
   });
+
+
+  const addImagesToDb = async function () {
+    console.log("getting images");
+
+    const options = {
+      method: "GET",
+      url: "https://contextualwebsearch-websearch-v1.p.rapidapi.com/api/Search/ImageSearchAPI",
+      params: {
+        q: input.siteTopic,
+        pageNumber: "1",
+        pageSize: "2",
+        autoCorrect: "true",
+        safeSearch: "true",
+      },
+      headers: {
+        "x-rapidapi-host":
+          "contextualwebsearch-websearch-v1.p.rapidapi.com",
+        "x-rapidapi-key":
+         xrapidapiKey,
+      },
+    };
+
+    axios
+    .request(options)
+    .then((response) => {
+      console.log("got images");
+
+      images = [response.data.value[0].url, response.data.value[1].url];
+    })
+    .catch((err) => {
+      console.error("image search failed, defaulting." + err);
+    });
+  }
